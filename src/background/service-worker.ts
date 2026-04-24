@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
+import { complete, buildNarrativePrompt } from '../ai/claude';
 import type {
   SessionState,
   InteractionEvent,
@@ -125,6 +126,22 @@ async function startRecording(
 
 // ─── Stop recording ──────────────────────────────────────────────────────────
 
+// ─── AI enrichment ───────────────────────────────────────────────────────────
+
+async function enrichSpec(sessionId: string, spec: import('../types/spec').JourneySpec) {
+  const stored = await chrome.storage.local.get('anthropicApiKey');
+  const apiKey = stored.anthropicApiKey as string | undefined;
+  if (!apiKey) return;
+
+  const prompt = buildNarrativePrompt(spec);
+  const aiNarrative = await complete(apiKey, prompt, { maxTokens: 1500 });
+
+  const enriched = { ...spec, aiNarrative, aiEnriched: true };
+  await chrome.storage.local.set({ [`spec_${sessionId}`]: enriched });
+
+  chrome.runtime.sendMessage({ type: 'SPEC_ENRICHED', sessionId }).catch(() => {});
+}
+
 async function stopRecording() {
   if (!session.tabId || session.state === 'IDLE') return;
 
@@ -151,12 +168,15 @@ async function finalizeSpec() {
     sessionState: session,
   });
 
-  // Open side panel for review
+  // Open side panel immediately — enrichment runs in the background
   if (session.tabId) {
     await chrome.sidePanel.open({ tabId: session.tabId });
   }
 
   broadcastState();
+
+  // Auto-describe with Claude (non-blocking — side panel shows while this runs)
+  enrichSpec(session.sessionId!, spec).catch(() => {});
 }
 
 // ─── Pause / Resume ──────────────────────────────────────────────────────────
@@ -281,6 +301,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         session = { ...defaultSessionState };
         await persistState();
         broadcastState();
+        sendResponse({ ok: true });
+        break;
+
+      case 'GET_API_KEY': {
+        const s = await chrome.storage.local.get('anthropicApiKey');
+        sendResponse({ apiKey: s.anthropicApiKey ?? '' });
+        break;
+      }
+
+      case 'SET_API_KEY':
+        await chrome.storage.local.set({ anthropicApiKey: message.apiKey });
         sendResponse({ ok: true });
         break;
 

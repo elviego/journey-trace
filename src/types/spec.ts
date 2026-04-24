@@ -100,6 +100,8 @@ export interface JourneySpec {
   userAnnotations: Annotation[];
   generatedMarkdown: string;
   aiSystemPrompt: string;
+  aiNarrative?: string;
+  aiEnriched?: boolean;
 }
 
 // ─── Message protocol ────────────────────────────────────────────────────────
