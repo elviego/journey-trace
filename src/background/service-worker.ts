@@ -16,6 +16,7 @@ import { generateSpec } from '../spec-generator/generator';
 // ─── State ───────────────────────────────────────────────────────────────────
 
 let session: SessionState = { ...defaultSessionState };
+let stopTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
 async function persistState() {
   await chrome.storage.local.set({ sessionState: session });
@@ -157,6 +158,15 @@ async function stopRecording() {
   // Stop video recording
   if (session.options.captureVideo) {
     await chrome.runtime.sendMessage({ type: 'STOP_RECORDING' }).catch(() => {});
+    // Safety net: if VIDEO_STORED never arrives (offscreen doc crashed/missing), finalize anyway
+    if (stopTimeoutId) clearTimeout(stopTimeoutId);
+    stopTimeoutId = setTimeout(async () => {
+      stopTimeoutId = null;
+      if (session.state !== 'REVIEWING') {
+        await closeOffscreenDocument().catch(() => {});
+        await finalizeSpec();
+      }
+    }, 15000);
   } else {
     await finalizeSpec();
   }
@@ -377,6 +387,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       // ── From offscreen ──────────────────────────────────────────────
       case 'VIDEO_STORED':
+        if (stopTimeoutId) { clearTimeout(stopTimeoutId); stopTimeoutId = null; }
         await closeOffscreenDocument();
         await finalizeSpec();
         break;

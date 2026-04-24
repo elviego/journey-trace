@@ -66,7 +66,10 @@ async function startRecording(streamId: string, sessionId: string) {
 
 function stopRecording() {
   if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-    mediaRecorder.stop();
+    mediaRecorder.stop(); // onstop will send VIDEO_STORED
+  } else {
+    // No active recorder — notify service worker so it can still finalize
+    chrome.runtime.sendMessage({ type: 'VIDEO_STORED', sessionId: currentSessionId ?? '' });
   }
 }
 
