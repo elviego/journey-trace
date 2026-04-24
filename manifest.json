@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "Journey Trace",
+  "version": "1.0.0",
+  "description": "Record, map, and document website flows as AI-ready specifications",
+  "permissions": [
+    "activeTab",
+    "tabs",
+    "scripting",
+    "tabCapture",
+    "offscreen",
+    "storage",
+    "sidePanel"
+  ],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "src/background/service-worker.ts",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "src/popup/popup.html",
+    "default_title": "Journey Trace"
+  },
+  "side_panel": {
+    "default_path": "src/sidepanel/sidepanel.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/content/content.ts"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ]
+}
