@@ -1,0 +1,5 @@
+# Enforce LF line endings for all text files (prevents CRLF corruption on Windows/macOS)
+* text=auto eol=lf
+
+# Treat built JS bundles as binary so git never applies text transforms
+dist/src/content/content.js binary
