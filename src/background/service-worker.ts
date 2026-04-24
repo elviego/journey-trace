@@ -17,10 +17,20 @@ import { generateSpec } from '../spec-generator/generator';
 
 let session: SessionState = { ...defaultSessionState };
 let stopTimeoutId: ReturnType<typeof setTimeout> | null = null;
+let persistDebounceId: ReturnType<typeof setTimeout> | null = null;
 let stateLoaded = false;
 
 async function persistState() {
   await chrome.storage.local.set({ sessionState: session });
+}
+
+// Coalesce rapid event bursts into a single storage write
+function schedulePersist() {
+  if (persistDebounceId) return;
+  persistDebounceId = setTimeout(async () => {
+    persistDebounceId = null;
+    await persistState();
+  }, 1500);
 }
 
 async function loadState() {
@@ -166,16 +176,22 @@ async function stopRecording() {
 
   // Stop video recording
   if (session.options.captureVideo) {
-    await chrome.runtime.sendMessage({ type: 'STOP_RECORDING' }).catch(() => {});
-    // Safety net: if VIDEO_STORED never arrives (offscreen doc crashed/missing), finalize anyway
-    if (stopTimeoutId) clearTimeout(stopTimeoutId);
-    stopTimeoutId = setTimeout(async () => {
-      stopTimeoutId = null;
-      if (session.state !== 'REVIEWING') {
-        await closeOffscreenDocument().catch(() => {});
-        await finalizeSpec();
-      }
-    }, 15000);
+    const hasDoc = await chrome.offscreen.hasDocument().catch(() => false);
+    if (hasDoc) {
+      await chrome.runtime.sendMessage({ type: 'STOP_RECORDING' }).catch(() => {});
+      // Safety net: VIDEO_STORED should arrive within a few seconds; finalize anyway if it doesn't
+      if (stopTimeoutId) clearTimeout(stopTimeoutId);
+      stopTimeoutId = setTimeout(async () => {
+        stopTimeoutId = null;
+        if (session.state !== 'REVIEWING') {
+          await closeOffscreenDocument().catch(() => {});
+          await finalizeSpec();
+        }
+      }, 5000);
+    } else {
+      // Offscreen doc gone (service worker restarted) — finalize immediately
+      await finalizeSpec();
+    }
   } else {
     await finalizeSpec();
   }
@@ -362,12 +378,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case 'INTERACTION': {
         const interaction = message.event as InteractionEvent;
         if (session.state === 'RECORDING') {
-          // Auto-detect navigation trigger from clicks on links
           if (interaction.type === 'click' && interaction.target.tagName === 'A') {
             const last = session.navigationFlow[session.navigationFlow.length - 1];
             if (last) last.trigger = 'link';
           }
           session.interactions.push(interaction);
+          schedulePersist();
         }
         break;
       }
@@ -375,6 +391,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case 'API_CALL':
         if (session.state === 'RECORDING' && session.options.captureApiCalls) {
           session.apiCalls.push(message.call as ApiCallSpec);
+          schedulePersist();
         }
         break;
 
@@ -392,6 +409,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const { url, components } = message as { url: string; components: PageSpec['components'] };
         if (session.pages[url]) {
           session.pages[url].components = components;
+          schedulePersist();
         }
         break;
       }
