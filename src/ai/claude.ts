@@ -60,6 +60,7 @@ export async function stream(
 
   try {
     while (true) {
+      if (opts?.signal?.aborted) break;
       const { done, value } = await reader.read();
       if (done) break;
       for (const line of decoder.decode(value, { stream: true }).split('\n')) {

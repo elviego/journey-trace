@@ -11,6 +11,8 @@ let currentSessionId: string | null = null;
 let stopRrweb: (() => void) | null = null;
 let originalFetch: typeof window.fetch | null = null;
 let originalXhrOpen: typeof XMLHttpRequest.prototype.open | null = null;
+let originalXhrSend: typeof XMLHttpRequest.prototype.send | null = null;
+let originalXhrSetHeader: typeof XMLHttpRequest.prototype.setRequestHeader | null = null;
 
 // ─── Interaction helpers ──────────────────────────────────────────────────────
 
@@ -197,28 +199,33 @@ function restoreFetch() {
 
 function interceptXhr() {
   originalXhrOpen = XMLHttpRequest.prototype.open;
+  originalXhrSend = XMLHttpRequest.prototype.send;
+  originalXhrSetHeader = XMLHttpRequest.prototype.setRequestHeader;
   const open = originalXhrOpen;
+  const origSend = originalXhrSend;
+  const origSetHeader = originalXhrSetHeader;
 
   XMLHttpRequest.prototype.open = function (method: string, url: string | URL, ...rest: unknown[]) {
-    const start = Date.now();
-    const self = this;
+    this._jtMethod = method.toUpperCase();
+    this._jtUrl = url.toString();
+    this._jtStart = Date.now();
+    this._jtHeaders = {} as Record<string, string>;
 
     this.addEventListener('load', function () {
       if (!isActive || isPaused) return;
       let responseBody: unknown;
-      try {
-        responseBody = redactSensitive(JSON.parse(self.responseText));
-      } catch {}
+      try { responseBody = redactSensitive(JSON.parse(this.responseText)); } catch {}
 
       const call: ApiCallSpec = {
         callId: uuidv4(),
-        timestamp: start,
-        method: method.toUpperCase(),
-        url: url.toString(),
-        requestHeaders: {},
-        responseStatus: self.status,
+        timestamp: this._jtStart as number,
+        method: this._jtMethod as string,
+        url: this._jtUrl as string,
+        requestHeaders: this._jtHeaders as Record<string, string>,
+        requestBody: redactSensitive(this._jtBody),
+        responseStatus: this.status,
         responseBody,
-        durationMs: Date.now() - start,
+        durationMs: Date.now() - (this._jtStart as number),
       };
       chrome.runtime.sendMessage({ type: 'API_CALL', call });
     });
@@ -226,13 +233,27 @@ function interceptXhr() {
     // @ts-expect-error: spread rest args
     return open.call(this, method, url, ...rest);
   };
+
+  XMLHttpRequest.prototype.setRequestHeader = function (name: string, value: string) {
+    if (this._jtHeaders) {
+      (this._jtHeaders as Record<string, string>)[name] =
+        SENSITIVE_KEYS.has(name.toLowerCase()) ? '[REDACTED]' : value;
+    }
+    return origSetHeader.call(this, name, value);
+  };
+
+  XMLHttpRequest.prototype.send = function (body?: Document | XMLHttpRequestBodyInit | null) {
+    if (body && typeof body === 'string') {
+      try { this._jtBody = JSON.parse(body); } catch { this._jtBody = body; }
+    }
+    return origSend.call(this, body);
+  };
 }
 
 function restoreXhr() {
-  if (originalXhrOpen) {
-    XMLHttpRequest.prototype.open = originalXhrOpen;
-    originalXhrOpen = null;
-  }
+  if (originalXhrOpen) { XMLHttpRequest.prototype.open = originalXhrOpen; originalXhrOpen = null; }
+  if (originalXhrSend) { XMLHttpRequest.prototype.send = originalXhrSend; originalXhrSend = null; }
+  if (originalXhrSetHeader) { XMLHttpRequest.prototype.setRequestHeader = originalXhrSetHeader; originalXhrSetHeader = null; }
 }
 
 // ─── Component detection ──────────────────────────────────────────────────────

@@ -407,10 +407,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       case 'PAGE_COMPONENTS': {
         const { url, components } = message as { url: string; components: PageSpec['components'] };
-        if (session.pages[url]) {
-          session.pages[url].components = components;
-          schedulePersist();
+        if (!session.pages[url]) {
+          session.pages[url] = { pageId: uuidv4(), url, title: '', visitedAt: new Date().toISOString(), components: [] };
         }
+        session.pages[url].components = components;
+        schedulePersist();
         break;
       }
 
