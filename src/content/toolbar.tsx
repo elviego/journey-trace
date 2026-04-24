@@ -108,20 +108,24 @@ const STYLES = `
 // ─── Toolbar component ────────────────────────────────────────────────────────
 
 interface ToolbarProps {
+  paused: boolean;
   onAnnotate: (text: string, type: Annotation['type']) => void;
   onStop: () => void;
   onTogglePause: () => boolean;
 }
 
-function Toolbar({ onAnnotate, onStop, onTogglePause }: ToolbarProps) {
-  const [paused, setPaused] = useState(false);
+function Toolbar({ paused, onAnnotate, onStop, onTogglePause }: ToolbarProps) {
+  const [localPaused, setLocalPaused] = useState(paused);
   const [showAnnotation, setShowAnnotation] = useState(false);
   const [annotationText, setAnnotationText] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Sync when the service worker changes state externally (e.g. popup pause/resume)
+  useEffect(() => { setLocalPaused(paused); }, [paused]);
+
   function handleTogglePause() {
     const isRecording = onTogglePause();
-    setPaused(!isRecording);
+    setLocalPaused(!isRecording);
   }
 
   function handleAnnotationSubmit() {
@@ -140,12 +144,12 @@ function Toolbar({ onAnnotate, onStop, onTogglePause }: ToolbarProps) {
   return (
     <div className="jt-toolbar">
       <div
-        className={`jt-badge ${paused ? 'paused' : ''}`}
+        className={`jt-badge ${localPaused ? 'paused' : ''}`}
         onClick={() => setShowAnnotation((v) => !v)}
         title="Click to add a milestone annotation"
       >
         <span className="jt-dot" />
-        {paused ? 'PAUSED' : 'RECORDING'}
+        {localPaused ? 'PAUSED' : 'RECORDING'}
       </div>
 
       {showAnnotation && (
@@ -167,7 +171,7 @@ function Toolbar({ onAnnotate, onStop, onTogglePause }: ToolbarProps) {
 
       <div className="jt-controls">
         <button className="jt-btn" onClick={handleTogglePause}>
-          {paused ? '▶ Resume' : '⏸ Pause'}
+          {localPaused ? '▶ Resume' : '⏸ Pause'}
         </button>
         <button className="jt-btn danger" onClick={onStop}>
           ⏹ Stop
@@ -181,6 +185,18 @@ function Toolbar({ onAnnotate, onStop, onTogglePause }: ToolbarProps) {
 
 let host: HTMLDivElement | null = null;
 let root: Root | null = null;
+let toolbarProps: Omit<ToolbarProps, 'paused'> | null = null;
+let toolbarPaused = false;
+
+function rerender() {
+  if (!root || !toolbarProps) return;
+  root.render(<Toolbar paused={toolbarPaused} {...toolbarProps} />);
+}
+
+export function setToolbarPaused(paused: boolean) {
+  toolbarPaused = paused;
+  rerender();
+}
 
 export function mountToolbar(
   _sessionId: string,
@@ -189,6 +205,9 @@ export function mountToolbar(
   onTogglePause: () => boolean,
 ) {
   if (host) return;
+
+  toolbarProps = { onAnnotate, onStop, onTogglePause };
+  toolbarPaused = false;
 
   host = document.createElement('div');
   host.id = 'journey-trace-toolbar';
@@ -204,9 +223,7 @@ export function mountToolbar(
   shadow.appendChild(container);
 
   root = createRoot(container);
-  root.render(
-    <Toolbar onAnnotate={onAnnotate} onStop={onStop} onTogglePause={onTogglePause} />,
-  );
+  rerender();
 }
 
 export function unmountToolbar() {
@@ -214,4 +231,6 @@ export function unmountToolbar() {
   host?.remove();
   root = null;
   host = null;
+  toolbarProps = null;
+  toolbarPaused = false;
 }

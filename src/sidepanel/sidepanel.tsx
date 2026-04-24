@@ -89,8 +89,21 @@ function NarrativeBanner({ spec }: { spec: JourneySpec }) {
 
 // ─── Timeline tab ─────────────────────────────────────────────────────────────
 
-function TimelineItem({ item }: { item: InteractionEvent }) {
+function TimelineItem({
+  item,
+  onNoteChange,
+}: {
+  item: InteractionEvent;
+  onNoteChange: (eventId: string, note: string) => void;
+}) {
   const [note, setNote] = useState(item.userAnnotation ?? '');
+
+  function commitNote() {
+    const trimmed = note.trim();
+    if (trimmed !== (item.userAnnotation ?? '')) {
+      onNoteChange(item.eventId, trimmed);
+    }
+  }
 
   return (
     <div className={`timeline-item ${item.type}`}>
@@ -108,13 +121,21 @@ function TimelineItem({ item }: { item: InteractionEvent }) {
           placeholder="Add note…"
           value={note}
           onChange={(e) => setNote(e.target.value)}
+          onBlur={commitNote}
+          onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
         />
       </div>
     </div>
   );
 }
 
-function Timeline({ spec }: { spec: JourneySpec }) {
+function Timeline({
+  spec,
+  onNoteChange,
+}: {
+  spec: JourneySpec;
+  onNoteChange: (eventId: string, note: string) => void;
+}) {
   const items = [
     ...spec.interactions,
     ...spec.userAnnotations.map((a) => ({ ...a, type: 'milestone' as const })),
@@ -136,7 +157,13 @@ function Timeline({ spec }: { spec: JourneySpec }) {
                   </div>
                 );
               }
-              return <TimelineItem key={(item as InteractionEvent).eventId} item={item as InteractionEvent} />;
+              return (
+                <TimelineItem
+                  key={(item as InteractionEvent).eventId}
+                  item={item as InteractionEvent}
+                  onNoteChange={onNoteChange}
+                />
+              );
             })}
           </div>
         )}
@@ -355,6 +382,7 @@ type Tab = 'timeline' | 'pages' | 'api' | 'export';
 
 function App() {
   const [spec, setSpec] = useState<JourneySpec | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('timeline');
   const [loading, setLoading] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
@@ -363,12 +391,27 @@ function App() {
     const stored = await chrome.storage.local.get('sessionState');
     const state = stored.sessionState;
     if (state?.sessionId) {
+      setSessionId(state.sessionId);
       const specStored = await chrome.storage.local.get(`spec_${state.sessionId}`);
       const s = specStored[`spec_${state.sessionId}`];
       if (s) setSpec(s as JourneySpec);
     }
     setLoading(false);
   }, []);
+
+  async function handleNoteChange(eventId: string, note: string) {
+    if (!spec || !sessionId) return;
+    const idx = spec.interactions.findIndex((i) => i.eventId === eventId);
+    if (idx === -1) return;
+    const updated: JourneySpec = {
+      ...spec,
+      interactions: spec.interactions.map((i) =>
+        i.eventId === eventId ? { ...i, userAnnotation: note } : i,
+      ),
+    };
+    setSpec(updated);
+    await chrome.storage.local.set({ [`spec_${sessionId}`]: updated });
+  }
 
   useEffect(() => {
     loadSpec();
@@ -441,7 +484,7 @@ function App() {
       </div>
 
       <div className="content">
-        {tab === 'timeline' && <Timeline spec={spec} />}
+        {tab === 'timeline' && <Timeline spec={spec} onNoteChange={handleNoteChange} />}
         {tab === 'pages' && <PagesTab spec={spec} />}
         {tab === 'api' && <ApiTab spec={spec} />}
         {tab === 'export' && <ExportTab spec={spec} />}

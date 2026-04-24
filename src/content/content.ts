@@ -1,7 +1,7 @@
 import { record } from 'rrweb';
 import { v4 as uuidv4 } from 'uuid';
 import type { InteractionEvent, ApiCallSpec, Annotation } from '../types/spec';
-import { mountToolbar, unmountToolbar } from './toolbar';
+import { mountToolbar, unmountToolbar, setToolbarPaused } from './toolbar';
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -372,9 +372,11 @@ chrome.runtime.onMessage.addListener((message) => {
       break;
     case 'PAUSE_RECORDING':
       isPaused = true;
+      setToolbarPaused(true);
       break;
     case 'RESUME_RECORDING':
       isPaused = false;
+      setToolbarPaused(false);
       break;
   }
 });
