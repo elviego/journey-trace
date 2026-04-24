@@ -17,6 +17,7 @@ import { generateSpec } from '../spec-generator/generator';
 
 let session: SessionState = { ...defaultSessionState };
 let stopTimeoutId: ReturnType<typeof setTimeout> | null = null;
+let stateLoaded = false;
 
 async function persistState() {
   await chrome.storage.local.set({ sessionState: session });
@@ -26,6 +27,14 @@ async function loadState() {
   const stored = await chrome.storage.local.get('sessionState');
   if (stored.sessionState) {
     session = stored.sessionState as SessionState;
+  }
+}
+
+// MV3 service workers restart silently — restore persisted state on first message
+async function ensureStateLoaded() {
+  if (!stateLoaded) {
+    await loadState();
+    stateLoaded = true;
   }
 }
 
@@ -234,6 +243,7 @@ function broadcastState() {
 // ─── Tab navigation tracking ─────────────────────────────────────────────────
 
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  await ensureStateLoaded();
   if (tabId !== session.tabId || session.state !== 'RECORDING') return;
   if (changeInfo.status !== 'complete' || !tab.url) return;
 
@@ -272,6 +282,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
+    await ensureStateLoaded();
     switch (message.type) {
       // ── From popup ──────────────────────────────────────────────────
       case 'GET_STATE':
