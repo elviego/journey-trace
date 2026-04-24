@@ -129,3 +129,17 @@ body {
 }
 .btn-open-panel:hover { background: #15803d; }
 .btn-new { width: 100%; margin-top: 8px; }
+
+.btn-discard {
+  width: 100%;
+  margin-top: 10px;
+  background: none;
+  border: none;
+  color: #475569;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 4px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.btn-discard:hover { color: #94a3b8; }

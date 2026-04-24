@@ -96,13 +96,19 @@ async function startRecording(
 
   // Start video recording via offscreen document
   if (options.captureVideo) {
-    await ensureOffscreenDocument();
-    const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tabId });
-    await chrome.runtime.sendMessage({
-      type: 'START_RECORDING',
-      streamId,
-      sessionId: session.sessionId,
-    });
+    try {
+      await ensureOffscreenDocument();
+      const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tabId });
+      await chrome.runtime.sendMessage({
+        type: 'START_RECORDING',
+        streamId,
+        sessionId: session.sessionId,
+      });
+    } catch (err) {
+      // Capture permission denied or tab not capturable — continue without video
+      console.warn('Journey Trace: video capture unavailable, continuing without it:', err);
+      session.options = { ...session.options, captureVideo: false };
+    }
   }
 
   // Activate content script recording
@@ -259,7 +265,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     switch (message.type) {
       // ── From popup ──────────────────────────────────────────────────
       case 'GET_STATE':
-        sendResponse({ state: session.state, sessionId: session.sessionId });
+        sendResponse({
+          state: session.state,
+          sessionId: session.sessionId,
+          flowName: session.flowName,
+          flowGoal: session.flowGoal,
+          startedAt: session.startedAt,
+        });
         break;
 
       case 'START_RECORDING_REQUEST': {

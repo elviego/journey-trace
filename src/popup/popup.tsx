@@ -4,9 +4,12 @@ import type { RecordingState, SessionOptions } from '../types/spec';
 
 // ─── Timer hook ───────────────────────────────────────────────────────────────
 
-function useTimer(running: boolean) {
-  const [elapsed, setElapsed] = useState(0);
+function useTimer(running: boolean, initialSeconds = 0) {
+  const [elapsed, setElapsed] = useState(initialSeconds);
   const ref = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Reset elapsed when initialSeconds changes (popup re-opened mid-session)
+  useEffect(() => { setElapsed(initialSeconds); }, [initialSeconds]);
 
   useEffect(() => {
     if (running) {
@@ -98,19 +101,25 @@ interface RecordingViewProps {
   flowName: string;
   flowGoal: string;
   state: RecordingState;
+  startedAt: string | null;
   onPause: () => void;
   onResume: () => void;
   onStop: () => void;
+  onDiscard: () => void;
 }
 
-function RecordingView({ flowName, flowGoal, state, onPause, onResume, onStop }: RecordingViewProps) {
-  const timer = useTimer(state === 'RECORDING');
+function RecordingView({ flowName, flowGoal, state, startedAt, onPause, onResume, onStop, onDiscard }: RecordingViewProps) {
+  const initialSeconds = startedAt
+    ? Math.max(0, Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000))
+    : 0;
+
+  const timer = useTimer(state === 'RECORDING', initialSeconds);
   const paused = state === 'PAUSED';
 
   return (
     <>
       <div className="status-box">
-        <div className="status-label">Recording</div>
+        <div className="status-label">{paused ? 'Paused' : 'Recording'}</div>
         <div className="status-name" title={flowName}>{flowName || 'Untitled flow'}</div>
         {flowGoal && <div className="status-goal">{flowGoal}</div>}
         <div className={`timer ${paused ? 'paused' : ''}`}>{timer}</div>
@@ -123,6 +132,9 @@ function RecordingView({ flowName, flowGoal, state, onPause, onResume, onStop }:
         )}
         <button className="btn-danger" onClick={onStop}>⏹ Stop & Review</button>
       </div>
+      <button className="btn-discard" onClick={onDiscard}>
+        Discard &amp; start over
+      </button>
     </>
   );
 }
@@ -166,17 +178,21 @@ function App() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [flowName, setFlowName] = useState('');
   const [flowGoal, setFlowGoal] = useState('');
+  const [startedAt, setStartedAt] = useState<string | null>(null);
 
   useEffect(() => {
-    // Load current state from service worker
+    // Load current state from service worker — recover flowName/goal/startedAt on re-open
     chrome.runtime.sendMessage({ type: 'GET_STATE' }, (res) => {
       if (res) {
         setAppState(res.state);
         setSessionId(res.sessionId);
+        if (res.flowName) setFlowName(res.flowName);
+        if (res.flowGoal) setFlowGoal(res.flowGoal);
+        if (res.startedAt) setStartedAt(res.startedAt);
       }
     });
 
-    // Listen for state updates
+    // Listen for state updates while the popup is open
     const handler = (msg: { type: string; state: RecordingState; sessionId: string | null }) => {
       if (msg.type === 'STATE_UPDATE') {
         setAppState(msg.state);
@@ -190,6 +206,7 @@ function App() {
   async function handleStart(name: string, goal: string, options: SessionOptions) {
     setFlowName(name);
     setFlowGoal(goal);
+    setStartedAt(new Date().toISOString());
     await chrome.runtime.sendMessage({
       type: 'START_RECORDING_REQUEST',
       flowName: name,
@@ -210,13 +227,17 @@ function App() {
     await chrome.runtime.sendMessage({ type: 'STOP_RECORDING_REQUEST' });
   }
 
-  async function handleNew() {
+  async function handleDiscard() {
     await chrome.runtime.sendMessage({ type: 'RESET' });
     setFlowName('');
     setFlowGoal('');
+    setStartedAt(null);
   }
 
-  const dotClass = appState === 'RECORDING' ? 'dot recording' : appState === 'PAUSED' ? 'dot paused' : 'dot';
+  const dotClass =
+    appState === 'RECORDING' ? 'dot recording'
+    : appState === 'PAUSED' ? 'dot paused'
+    : 'dot';
 
   return (
     <>
@@ -231,13 +252,15 @@ function App() {
             flowName={flowName}
             flowGoal={flowGoal}
             state={appState}
+            startedAt={startedAt}
             onPause={handlePause}
             onResume={handleResume}
             onStop={handleStop}
+            onDiscard={handleDiscard}
           />
         )}
         {appState === 'REVIEWING' && (
-          <ReviewView sessionId={sessionId} onNew={handleNew} />
+          <ReviewView sessionId={sessionId} onNew={handleDiscard} />
         )}
       </div>
     </>
