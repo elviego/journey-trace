@@ -1,5 +1,5 @@
 import { createRoot, type Root } from 'react-dom/client';
-import { useState, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { Annotation } from '../types/spec';
 
 // ─── Styles injected into shadow DOM ─────────────────────────────────────────

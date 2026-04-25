@@ -118,6 +118,7 @@ async function startRecording(
   if (options.captureVideo) {
     try {
       await ensureOffscreenDocument();
+      // @ts-expect-error: getMediaStreamId Promise overload not in @types/chrome but exists at runtime
       const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tabId });
       await chrome.runtime.sendMessage({
         type: 'START_RECORDING',

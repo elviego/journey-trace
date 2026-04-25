@@ -18,7 +18,7 @@ function describeInteraction(event: InteractionEvent): string {
   switch (event.type) {
     case 'click':
       if (t.tagName === 'a') return `Clicked link ${el}`;
-      if (t.tagName === 'button' || t.role === 'button') return `Clicked button ${el}`;
+      if (t.tagName === 'button') return `Clicked button ${el}`;
       return `Clicked ${t.tagName} ${el}`;
     case 'input':
       if (t.inputType === 'password') return `Entered password in ${el}`;

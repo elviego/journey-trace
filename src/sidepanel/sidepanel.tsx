@@ -212,10 +212,10 @@ function ApiTab({ spec }: { spec: JourneySpec }) {
           <div className={`api-status ${statusClass(call.responseStatus)}`}>
             {call.responseStatus} · {call.durationMs}ms
           </div>
-          {call.requestBody && (
+          {call.requestBody != null && (
             <div className="api-body">{JSON.stringify(call.requestBody, null, 2)}</div>
           )}
-          {call.responseBody && (
+          {call.responseBody != null && (
             <div className="api-body">{JSON.stringify(call.responseBody, null, 2)}</div>
           )}
         </div>

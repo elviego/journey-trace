@@ -3,12 +3,23 @@ import { v4 as uuidv4 } from 'uuid';
 import type { InteractionEvent, ApiCallSpec, Annotation } from '../types/spec';
 import { mountToolbar, unmountToolbar, setToolbarPaused } from './toolbar';
 
+// Extend XMLHttpRequest with per-instance tracking properties
+declare global {
+  interface XMLHttpRequest {
+    _jtMethod?: string;
+    _jtUrl?: string;
+    _jtStart?: number;
+    _jtHeaders?: Record<string, string>;
+    _jtBody?: unknown;
+  }
+}
+
 // ─── State ────────────────────────────────────────────────────────────────────
 
 let isActive = false;
 let isPaused = false;
 let currentSessionId: string | null = null;
-let stopRrweb: (() => void) | null = null;
+let stopRrweb: (() => void) | null | undefined = null;
 let originalFetch: typeof window.fetch | null = null;
 let originalXhrOpen: typeof XMLHttpRequest.prototype.open | null = null;
 let originalXhrSend: typeof XMLHttpRequest.prototype.send | null = null;
@@ -314,7 +325,7 @@ function activate(sessionId: string) {
   interceptXhr();
   addEventListeners();
 
-  stopRrweb = record({
+  stopRrweb = record({  // rrweb returns listenerHandler | undefined; nullish coalescing below handles undefined
     emit(event) {
       if (isActive && !isPaused) {
         chrome.runtime.sendMessage({ type: 'RRWEB_EVENT', event });
