@@ -108,7 +108,8 @@ async function startRecording(
   };
 
   // Get current tab URL and title
-  const tab = await chrome.tabs.get(tabId);
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  if (!tab) return; // Tab closed between popup click and SW execution
   session.lastUrl = tab.url ?? '';
 
   // Capture initial screenshot
@@ -132,11 +133,11 @@ async function startRecording(
     }
   }
 
-  // Activate content script recording
+  // Activate content script recording (may fail on chrome:// or PDF tabs — safe to ignore)
   await chrome.tabs.sendMessage(tabId, {
     type: 'START_RECORDING',
     sessionId: session.sessionId,
-  });
+  }).catch(() => {});
 
   // Record initial page
   session.pages[tab.url ?? ''] = {
@@ -203,7 +204,14 @@ async function finalizeSpec() {
   const endedAt = new Date().toISOString();
 
   const startMs = session.startedAt ? new Date(session.startedAt).getTime() : Date.now();
-  const spec = generateSpec(session, endedAt, (Date.now() - startMs) / 1000);
+
+  let spec: ReturnType<typeof generateSpec>;
+  try {
+    spec = generateSpec(session, endedAt, (Date.now() - startMs) / 1000);
+  } catch {
+    broadcastState();
+    return;
+  }
 
   await chrome.storage.local.set({
     [`spec_${session.sessionId}`]: spec,
@@ -212,7 +220,7 @@ async function finalizeSpec() {
 
   // Open side panel immediately — enrichment runs in the background
   if (session.tabId) {
-    await chrome.sidePanel.open({ tabId: session.tabId });
+    await chrome.sidePanel.open({ tabId: session.tabId }).catch(() => {});
   }
 
   broadcastState();
