@@ -390,10 +390,16 @@ function App() {
   const loadSpec = useCallback(async () => {
     const stored = await chrome.storage.local.get('sessionState');
     const state = stored.sessionState;
-    if (state?.sessionId) {
+    if (state?.sessionId && state.state === 'REVIEWING') {
       setSessionId(state.sessionId);
-      const specStored = await chrome.storage.local.get(`spec_${state.sessionId}`);
-      const s = specStored[`spec_${state.sessionId}`];
+      // Retry for up to 5s in case finalizeSpec() hasn't written the spec yet
+      let s: JourneySpec | undefined;
+      for (let i = 0; i < 10; i++) {
+        const specStored = await chrome.storage.local.get(`spec_${state.sessionId}`);
+        s = specStored[`spec_${state.sessionId}`];
+        if (s) break;
+        await new Promise<void>((r) => setTimeout(r, 500));
+      }
       if (s) setSpec(s as JourneySpec);
     }
     setLoading(false);
@@ -416,13 +422,17 @@ function App() {
   useEffect(() => {
     loadSpec();
 
-    const handler = (msg: { type: string; journeyId?: string; sessionId?: string }) => {
+    const handler = (msg: { type: string; journeyId?: string; sessionId?: string; state?: string }) => {
       if (msg.type === 'SPEC_ENRICHED' && msg.sessionId) {
         // Reload to pick up the AI narrative
         chrome.storage.local.get(`spec_${msg.sessionId}`).then((stored) => {
           const s = stored[`spec_${msg.sessionId}`];
           if (s) setSpec(s as JourneySpec);
         });
+      }
+      if (msg.type === 'STATE_UPDATE' && msg.state === 'IDLE') {
+        setSpec(null);
+        setSessionId(null);
       }
     };
 

@@ -82,6 +82,10 @@ async function captureScreenshot(milestone?: string): Promise<Screenshot | null>
       pageUrl: session.lastUrl,
     };
     session.screenshots.push(screenshot);
+    // Keep at most 15 screenshots to stay within storage quota
+    if (session.screenshots.length > 15) {
+      session.screenshots = session.screenshots.slice(-15);
+    }
     return screenshot;
   } catch {
     return null;
@@ -301,6 +305,12 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 
   await captureScreenshot(`page_${session.navStep}`);
   await persistState();
+
+  // Re-activate content script recording on the new page
+  await chrome.tabs.sendMessage(tabId, {
+    type: 'START_RECORDING',
+    sessionId: session.sessionId,
+  }).catch(() => {});
 });
 
 // ─── Message handler ─────────────────────────────────────────────────────────
@@ -377,7 +387,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case 'RRWEB_EVENT':
         if (session.state === 'RECORDING') {
           session.rrwebEvents.push(message.event);
-          // Flush to storage periodically to avoid memory issues
+          // Keep only the last 500 events to stay within storage quota
+          if (session.rrwebEvents.length > 500) {
+            session.rrwebEvents = session.rrwebEvents.slice(-500);
+          }
           if (session.rrwebEvents.length % 50 === 0) {
             await persistState();
           }
