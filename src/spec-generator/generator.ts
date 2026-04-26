@@ -37,10 +37,12 @@ function describeInteraction(event: InteractionEvent): string {
 // ─── Extract meaningful page info from rrweb events ──────────────────────────
 
 function buildPageSpecs(state: SessionState): PageSpec[] {
-  return Object.values(state.pages).map((p) => ({
-    ...p,
-    screenshot: state.screenshots.find((s) => s.pageUrl === p.url)?.dataUrl,
-  }));
+  return Object.values(state.pages)
+    .sort((a, b) => new Date(a.visitedAt).getTime() - new Date(b.visitedAt).getTime())
+    .map((p) => ({
+      ...p,
+      screenshot: state.screenshots.find((s) => s.pageUrl === p.url)?.dataUrl,
+    }));
 }
 
 // ─── Infer navigation trigger from surrounding events ────────────────────────
@@ -178,7 +180,7 @@ ${spec.metadata.flowName ? `**Flow:** ${spec.metadata.flowName}` : ''}
 ${spec.metadata.flowGoal ? `**Goal:** ${spec.metadata.flowGoal}` : ''}
 
 ### Pages (${spec.pages.length})
-${spec.pages.map((p) => `- ${p.title || p.url}: ${p.components.map((c) => c.role).join(', ')}`).join('\n')}
+${spec.pages.map((p) => `- ${p.title || p.url}: ${(p.components ?? []).map((c) => c.role).join(', ')}`).join('\n')}
 
 ### Flow Steps
 ${spec.interactions.map((e, i) => `${i + 1}. ${describeInteraction(e)}`).join('\n')}

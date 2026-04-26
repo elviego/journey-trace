@@ -146,6 +146,15 @@ function removeEventListeners() {
 
 const SENSITIVE_KEYS = new Set(['password', 'token', 'secret', 'authorization', 'apikey', 'api_key']);
 
+// Skip obvious static asset fetches — only capture likely API calls
+const STATIC_EXT = /\.(png|jpe?g|gif|webp|avif|svg|ico|css|js|mjs|woff2?|ttf|eot|otf|mp4|webm|mp3|pdf|zip|wasm)(\?|#|$)/i;
+
+function isApiLike(url: string, method: string): boolean {
+  if (url.startsWith('data:') || url.startsWith('blob:') || url.startsWith('chrome-extension:')) return false;
+  if (method === 'GET' && STATIC_EXT.test(url.split('?')[0])) return false;
+  return true;
+}
+
 function redactSensitive(obj: unknown): unknown {
   if (!obj || typeof obj !== 'object') return obj;
   const result: Record<string, unknown> = {};
@@ -163,6 +172,8 @@ function interceptFetch() {
     const start = Date.now();
     const url = typeof input === 'string' ? input : (input as Request).url;
     const method = (init?.method ?? (typeof input === 'string' ? 'GET' : (input as Request).method)).toUpperCase();
+
+    if (!isApiLike(url, method)) return originalFetch!(input, init);
 
     let requestBody: unknown;
     try {
@@ -224,6 +235,7 @@ function interceptXhr() {
 
     this.addEventListener('load', function () {
       if (!isActive || isPaused) return;
+      if (!isApiLike(this._jtUrl ?? '', this._jtMethod ?? 'GET')) return;
       let responseBody: unknown;
       try { responseBody = redactSensitive(JSON.parse(this.responseText)); } catch {}
 
