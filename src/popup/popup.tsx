@@ -150,7 +150,7 @@ function ReviewView({ sessionId, onNew }: ReviewViewProps) {
   async function openPanel() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab?.id) {
-      await chrome.sidePanel.open({ tabId: tab.id });
+      await chrome.sidePanel.open({ tabId: tab.id }).catch(() => {});
       window.close();
     }
   }
@@ -183,6 +183,7 @@ function App() {
   useEffect(() => {
     // Load current state from service worker — recover flowName/goal/startedAt on re-open
     chrome.runtime.sendMessage({ type: 'GET_STATE' }, (res) => {
+      if (chrome.runtime.lastError) return; // SW restarting — ignore
       if (res) {
         setAppState(res.state);
         setSessionId(res.sessionId);
@@ -212,23 +213,23 @@ function App() {
       flowName: name,
       flowGoal: goal,
       options,
-    });
+    }).catch(() => {});
   }
 
   async function handlePause() {
-    await chrome.runtime.sendMessage({ type: 'PAUSE_RECORDING_REQUEST' });
+    await chrome.runtime.sendMessage({ type: 'PAUSE_RECORDING_REQUEST' }).catch(() => {});
   }
 
   async function handleResume() {
-    await chrome.runtime.sendMessage({ type: 'RESUME_RECORDING_REQUEST' });
+    await chrome.runtime.sendMessage({ type: 'RESUME_RECORDING_REQUEST' }).catch(() => {});
   }
 
   async function handleStop() {
-    await chrome.runtime.sendMessage({ type: 'STOP_RECORDING_REQUEST' });
+    await chrome.runtime.sendMessage({ type: 'STOP_RECORDING_REQUEST' }).catch(() => {});
   }
 
   async function handleDiscard() {
-    await chrome.runtime.sendMessage({ type: 'RESET' });
+    await chrome.runtime.sendMessage({ type: 'RESET' }).catch(() => {});
     setFlowName('');
     setFlowGoal('');
     setStartedAt(null);
