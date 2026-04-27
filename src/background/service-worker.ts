@@ -120,7 +120,8 @@ async function startRecording(
   await captureScreenshot('session_start');
 
   // Start video recording via offscreen document
-  if (options.captureVideo) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if (options.captureVideo && (chrome as any).tabCapture?.getMediaStreamId) {
     try {
       await ensureOffscreenDocument();
       // @ts-expect-error: getMediaStreamId Promise overload not in @types/chrome but exists at runtime
@@ -135,6 +136,8 @@ async function startRecording(
       console.warn('Journey Trace: video capture unavailable, continuing without it:', err);
       session.options = { ...session.options, captureVideo: false };
     }
+  } else if (options.captureVideo) {
+    session.options = { ...session.options, captureVideo: false };
   }
 
   // Activate content script recording (may fail on chrome:// or PDF tabs — safe to ignore)
