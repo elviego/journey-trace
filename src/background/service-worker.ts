@@ -126,11 +126,13 @@ async function startRecording(
       await ensureOffscreenDocument();
       // @ts-expect-error: getMediaStreamId Promise overload not in @types/chrome but exists at runtime
       const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tabId });
-      await chrome.runtime.sendMessage({
+      // Fire-and-forget: don't await so the SW's own onMessage listener returning `true`
+      // cannot hold this open indefinitely
+      chrome.runtime.sendMessage({
         type: 'START_RECORDING',
         streamId,
         sessionId: session.sessionId,
-      });
+      }).catch(() => {});
     } catch (err) {
       // Capture permission denied or tab not capturable — continue without video
       console.warn('Journey Trace: video capture unavailable, continuing without it:', err);
@@ -187,7 +189,7 @@ async function stopRecording() {
   if (session.options.captureVideo) {
     const hasDoc = await chrome.offscreen.hasDocument().catch(() => false);
     if (hasDoc) {
-      await chrome.runtime.sendMessage({ type: 'STOP_RECORDING' }).catch(() => {});
+      chrome.runtime.sendMessage({ type: 'STOP_RECORDING' }).catch(() => {});
       // Safety net: VIDEO_STORED should arrive within a few seconds; finalize anyway if it doesn't
       if (stopTimeoutId) clearTimeout(stopTimeoutId);
       stopTimeoutId = setTimeout(async () => {
@@ -243,7 +245,7 @@ async function pauseRecording() {
   session.state = 'PAUSED';
   await chrome.tabs.sendMessage(session.tabId, { type: 'PAUSE_RECORDING' }).catch(() => {});
   if (session.options.captureVideo) {
-    await chrome.runtime.sendMessage({ type: 'PAUSE_RECORDING' }).catch(() => {});
+    chrome.runtime.sendMessage({ type: 'PAUSE_RECORDING' }).catch(() => {});
   }
   await persistState();
   broadcastState();
@@ -254,7 +256,7 @@ async function resumeRecording() {
   session.state = 'RECORDING';
   await chrome.tabs.sendMessage(session.tabId, { type: 'RESUME_RECORDING' }).catch(() => {});
   if (session.options.captureVideo) {
-    await chrome.runtime.sendMessage({ type: 'RESUME_RECORDING' }).catch(() => {});
+    chrome.runtime.sendMessage({ type: 'RESUME_RECORDING' }).catch(() => {});
   }
   await persistState();
   broadcastState();
