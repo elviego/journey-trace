@@ -76,9 +76,6 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
 function NarrativeBanner({ spec }: { spec: JourneySpec }) {
   if (!spec.aiNarrative) return null;
 
-  // Parse the three sections out of the narrative
-  const sections = spec.aiNarrative.split(/\*\*(?:Summary|Flow Steps|Key UI Components)\*\*/g).filter(Boolean);
-
   return (
     <div className="narrative-banner">
       <div className="narrative-label">✨ AI Summary</div>
@@ -282,7 +279,6 @@ function ExportTab({ spec }: { spec: JourneySpec }) {
       await stream(apiKey, prompt, (chunk) => {
         setOutput((prev) => {
           const next = prev + chunk;
-          // Auto-scroll
           requestAnimationFrame(() => {
             if (outputRef.current) outputRef.current.scrollTop = outputRef.current.scrollHeight;
           });
@@ -314,7 +310,6 @@ function ExportTab({ spec }: { spec: JourneySpec }) {
 
   return (
     <div className="export-section">
-      {/* Standard exports */}
       <div className="export-preview">
         {spec.aiNarrative
           ? `${spec.aiNarrative}\n\n---\n\n${spec.generatedMarkdown}`.slice(0, 1500)
@@ -329,7 +324,6 @@ function ExportTab({ spec }: { spec: JourneySpec }) {
         <button className="btn-export" onClick={() => copyToClipboard(spec.aiSystemPrompt)}>⎘ AI Prompt</button>
       </div>
 
-      {/* Build with Claude */}
       <div className="build-divider">
         <span>or generate code with Claude</span>
       </div>
@@ -376,9 +370,120 @@ function ExportTab({ spec }: { spec: JourneySpec }) {
   );
 }
 
+// ─── History tab ──────────────────────────────────────────────────────────────
+
+interface HistoryEntry {
+  sessionId: string;
+  flowName: string;
+  startedAt: string;
+  durationSeconds: number;
+  pageCount: number;
+  interactionCount: number;
+}
+
+function HistoryTab({
+  onView,
+  currentSessionId,
+}: {
+  onView: (spec: JourneySpec) => void;
+  currentSessionId: string | null;
+}) {
+  const [entries, setEntries] = useState<HistoryEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [deleting, setDeleting] = useState<string | null>(null);
+
+  async function loadHistory() {
+    setLoading(true);
+    const all = await chrome.storage.local.get(null);
+    const specs: HistoryEntry[] = [];
+    for (const [key, value] of Object.entries(all)) {
+      if (!key.startsWith('spec_')) continue;
+      const s = value as JourneySpec;
+      if (!s?.metadata) continue;
+      specs.push({
+        sessionId: s.metadata.journeyId,
+        flowName: s.metadata.flowName || 'Untitled',
+        startedAt: s.metadata.startedAt,
+        durationSeconds: s.metadata.durationSeconds,
+        pageCount: s.pages?.length ?? 0,
+        interactionCount: s.interactions?.length ?? 0,
+      });
+    }
+    specs.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
+    setEntries(specs);
+    setLoading(false);
+  }
+
+  async function deleteRecording(sessionId: string) {
+    setDeleting(sessionId);
+    await chrome.storage.local.remove(`spec_${sessionId}`);
+    setEntries((prev) => prev.filter((e) => e.sessionId !== sessionId));
+    setDeleting(null);
+  }
+
+  async function viewRecording(sessionId: string) {
+    const stored = await chrome.storage.local.get(`spec_${sessionId}`);
+    const s = stored[`spec_${sessionId}`] as JourneySpec | undefined;
+    if (s) onView(s);
+  }
+
+  useEffect(() => { loadHistory(); }, []);
+
+  if (loading) return <div className="loading">Loading history…</div>;
+
+  if (!entries.length) {
+    return (
+      <div className="empty">
+        No recordings yet.<br />
+        Start a recording from the extension popup.
+      </div>
+    );
+  }
+
+  return (
+    <div className="history-list">
+      {entries.map((e) => {
+        const isCurrent = e.sessionId === currentSessionId;
+        const date = new Date(e.startedAt).toLocaleDateString([], {
+          month: 'short', day: 'numeric', year: 'numeric',
+        });
+        const time = new Date(e.startedAt).toLocaleTimeString([], {
+          hour: '2-digit', minute: '2-digit',
+        });
+        const dur = `${Math.floor(e.durationSeconds / 60)}m ${Math.floor(e.durationSeconds % 60)}s`;
+        return (
+          <div key={e.sessionId} className={`history-card${isCurrent ? ' current' : ''}`}>
+            <div className="history-name">
+              {e.flowName}
+              {isCurrent && <span className="current-badge">current</span>}
+            </div>
+            <div className="history-meta">
+              {date} at {time} · {dur} · {e.pageCount} pages · {e.interactionCount} interactions
+            </div>
+            <div className="history-actions">
+              <button className="btn-history-view" onClick={() => viewRecording(e.sessionId)}>
+                View
+              </button>
+              {!isCurrent && (
+                <button
+                  className="btn-history-delete"
+                  onClick={() => deleteRecording(e.sessionId)}
+                  disabled={deleting === e.sessionId}
+                >
+                  {deleting === e.sessionId ? '…' : 'Delete'}
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── Root app ─────────────────────────────────────────────────────────────────
 
-type Tab = 'timeline' | 'pages' | 'api' | 'export';
+type Tab = 'timeline' | 'pages' | 'api' | 'export' | 'history';
 
 function App() {
   const [spec, setSpec] = useState<JourneySpec | null>(null);
@@ -386,13 +491,15 @@ function App() {
   const [tab, setTab] = useState<Tab>('timeline');
   const [loading, setLoading] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
+  // Tracks when the user is reviewing a past recording (not the live session)
+  const [viewingHistoricalId, setViewingHistoricalId] = useState<string | null>(null);
+  const viewingHistoricalRef = useRef<string | null>(null);
 
   const loadSpec = useCallback(async () => {
     const stored = await chrome.storage.local.get('sessionState');
     const state = stored.sessionState;
     if (state?.sessionId && state.state === 'REVIEWING') {
       setSessionId(state.sessionId);
-      // Retry for up to 5s in case finalizeSpec() hasn't written the spec yet
       let s: JourneySpec | undefined;
       for (let i = 0; i < 10; i++) {
         const specStored = await chrome.storage.local.get(`spec_${state.sessionId}`);
@@ -405,10 +512,23 @@ function App() {
     setLoading(false);
   }, []);
 
+  function handleViewHistorical(historicalSpec: JourneySpec) {
+    viewingHistoricalRef.current = historicalSpec.metadata.journeyId;
+    setViewingHistoricalId(historicalSpec.metadata.journeyId);
+    setSpec(historicalSpec);
+    setTab('timeline');
+  }
+
+  function handleBackToCurrent() {
+    viewingHistoricalRef.current = null;
+    setViewingHistoricalId(null);
+    setSpec(null);
+    setTab('timeline');
+    loadSpec();
+  }
+
   async function handleNoteChange(eventId: string, note: string) {
-    if (!spec || !sessionId) return;
-    const idx = spec.interactions.findIndex((i) => i.eventId === eventId);
-    if (idx === -1) return;
+    if (!spec) return;
     const updated: JourneySpec = {
       ...spec,
       interactions: spec.interactions.map((i) =>
@@ -416,23 +536,33 @@ function App() {
       ),
     };
     setSpec(updated);
-    await chrome.storage.local.set({ [`spec_${sessionId}`]: updated });
+    await chrome.storage.local.set({ [`spec_${spec.metadata.journeyId}`]: updated });
   }
 
   useEffect(() => {
     loadSpec();
 
-    const handler = (msg: { type: string; journeyId?: string; sessionId?: string; state?: string }) => {
+    const handler = (msg: { type: string; sessionId?: string; state?: string }) => {
       if (msg.type === 'SPEC_ENRICHED' && msg.sessionId) {
-        // Reload to pick up the AI narrative
         chrome.storage.local.get(`spec_${msg.sessionId}`).then((stored) => {
           const s = stored[`spec_${msg.sessionId}`];
-          if (s) setSpec(s as JourneySpec);
+          // Only update displayed spec if it matches what we're currently showing
+          if (s && (viewingHistoricalRef.current === msg.sessionId ||
+              (!viewingHistoricalRef.current && msg.sessionId))) {
+            setSpec(s as JourneySpec);
+          }
         });
       }
-      if (msg.type === 'STATE_UPDATE' && msg.state === 'IDLE') {
-        setSpec(null);
-        setSessionId(null);
+      if (msg.type === 'STATE_UPDATE') {
+        if (msg.state === 'REVIEWING' && !viewingHistoricalRef.current) {
+          // New recording just finished — reload current spec
+          setSessionId(msg.sessionId ?? null);
+          loadSpec();
+        }
+        if (msg.state === 'IDLE' && !viewingHistoricalRef.current) {
+          setSpec(null);
+          setSessionId(null);
+        }
       }
     };
 
@@ -440,34 +570,16 @@ function App() {
     return () => chrome.runtime.onMessage.removeListener(handler);
   }, [loadSpec]);
 
-  if (loading) return <div className="loading">Loading…</div>;
-
-  if (!spec) {
-    return (
-      <div className="app">
-        <div className="header">
-          <div>
-            <h1>Journey Trace</h1>
-            <div className="meta">No active recording</div>
-          </div>
-          <button className="btn-settings" onClick={() => setShowSettings((v) => !v)}>⚙</button>
-        </div>
-        {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
-        <div className="empty">
-          Start a recording from the extension popup, then open this panel to review.
-        </div>
-      </div>
-    );
-  }
-
-  const { metadata } = spec;
-  const duration = `${Math.floor(metadata.durationSeconds / 60)}m ${Math.floor(metadata.durationSeconds % 60)}s`;
+  const duration = spec
+    ? `${Math.floor(spec.metadata.durationSeconds / 60)}m ${Math.floor(spec.metadata.durationSeconds % 60)}s`
+    : '';
 
   const tabs: { key: Tab; label: string }[] = [
-    { key: 'timeline', label: `Timeline (${spec.interactions.length})` },
-    { key: 'pages', label: `Pages (${spec.pages.length})` },
-    { key: 'api', label: `API (${spec.apiCalls.length})` },
+    { key: 'timeline', label: spec ? `Timeline (${spec.interactions.length})` : 'Timeline' },
+    { key: 'pages', label: spec ? `Pages (${spec.pages.length})` : 'Pages' },
+    { key: 'api', label: spec ? `API (${spec.apiCalls.length})` : 'API' },
     { key: 'export', label: 'Export' },
+    { key: 'history', label: 'History' },
   ];
 
   return (
@@ -475,29 +587,66 @@ function App() {
       <div className="header">
         <div>
           <h1>
-            {metadata.flowName || 'Journey'}
-            {spec.aiEnriched && <span className="ai-badge">✨ AI</span>}
+            {spec?.metadata.flowName || 'Journey Trace'}
+            {spec?.aiEnriched && <span className="ai-badge">✨ AI</span>}
           </h1>
-          <div className="meta">{duration} · {spec.navigationFlow.length} pages · {spec.apiCalls.length} API calls</div>
+          <div className="meta">
+            {viewingHistoricalId
+              ? 'Past recording'
+              : spec
+                ? `${duration} · ${spec.navigationFlow.length} pages · ${spec.apiCalls.length} API calls`
+                : 'No active recording'}
+          </div>
         </div>
         <button className="btn-settings" onClick={() => setShowSettings((v) => !v)} title="Settings">⚙</button>
       </div>
 
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
 
+      {viewingHistoricalId && (
+        <div className="history-back-banner">
+          <span>Viewing past recording</span>
+          {sessionId && sessionId !== viewingHistoricalId && (
+            <button className="btn-back-current" onClick={handleBackToCurrent}>
+              ← Current recording
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="tabs">
         {tabs.map((t) => (
-          <button key={t.key} className={`tab ${tab === t.key ? 'active' : ''}`} onClick={() => setTab(t.key)}>
+          <button
+            key={t.key}
+            className={`tab ${tab === t.key ? 'active' : ''}`}
+            onClick={() => setTab(t.key)}
+          >
             {t.label}
           </button>
         ))}
       </div>
 
       <div className="content">
-        {tab === 'timeline' && <Timeline spec={spec} onNoteChange={handleNoteChange} />}
-        {tab === 'pages' && <PagesTab spec={spec} />}
-        {tab === 'api' && <ApiTab spec={spec} />}
-        {tab === 'export' && <ExportTab spec={spec} />}
+        {loading ? (
+          <div className="loading">Loading…</div>
+        ) : tab === 'history' ? (
+          <HistoryTab onView={handleViewHistorical} currentSessionId={sessionId} />
+        ) : !spec ? (
+          <div className="empty">
+            Start a recording from the extension popup, then open this panel to review.
+            <br /><br />
+            <button className="btn-browse-history" onClick={() => setTab('history')}>
+              Browse past recordings
+            </button>
+          </div>
+        ) : (
+          <>
+            {tab === 'timeline' && <Timeline spec={spec} onNoteChange={handleNoteChange} />}
+            {tab === 'pages' && <PagesTab spec={spec} />}
+            {tab === 'api' && <ApiTab spec={spec} />}
+            {tab === 'export' && <ExportTab spec={spec} />}
+          </>
+        )}
       </div>
     </div>
   );

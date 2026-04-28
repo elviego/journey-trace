@@ -69,7 +69,7 @@ function getVisibleText(el: Element): string {
 
 function sendInteraction(event: InteractionEvent) {
   if (!isActive || isPaused) return;
-  chrome.runtime.sendMessage({ type: 'INTERACTION', event });
+  chrome.runtime.sendMessage({ type: 'INTERACTION', event }).catch(() => {});
 }
 
 // ─── Event listeners ──────────────────────────────────────────────────────────
@@ -206,7 +206,7 @@ function interceptFetch() {
       responseBody,
       durationMs: Date.now() - start,
     };
-    chrome.runtime.sendMessage({ type: 'API_CALL', call });
+    chrome.runtime.sendMessage({ type: 'API_CALL', call }).catch(() => {});
 
     return response;
   };
@@ -250,7 +250,7 @@ function interceptXhr() {
         responseBody,
         durationMs: Date.now() - (this._jtStart as number),
       };
-      chrome.runtime.sendMessage({ type: 'API_CALL', call });
+      chrome.runtime.sendMessage({ type: 'API_CALL', call }).catch(() => {});
     });
 
     // @ts-expect-error: spread rest args
@@ -311,7 +311,7 @@ function detectComponents() {
     type: 'PAGE_COMPONENTS',
     url: location.href,
     components,
-  });
+  }).catch(() => {});
 }
 
 // ─── Annotation handler (called from toolbar) ────────────────────────────────
@@ -323,7 +323,7 @@ export function sendAnnotation(text: string, type: Annotation['type']) {
     text,
     type,
   };
-  chrome.runtime.sendMessage({ type: 'ANNOTATION', annotation });
+  chrome.runtime.sendMessage({ type: 'ANNOTATION', annotation }).catch(() => {});
 }
 
 // ─── Activate / Deactivate ────────────────────────────────────────────────────
@@ -340,7 +340,7 @@ function activate(sessionId: string) {
   stopRrweb = record({  // rrweb returns listenerHandler | undefined; nullish coalescing below handles undefined
     emit(event) {
       if (isActive && !isPaused) {
-        chrome.runtime.sendMessage({ type: 'RRWEB_EVENT', event });
+        chrome.runtime.sendMessage({ type: 'RRWEB_EVENT', event }).catch(() => {});
       }
     },
     checkoutEveryNms: 15_000,
@@ -361,16 +361,16 @@ function deactivate() {
   restoreXhr();
   removeEventListeners();
   unmountToolbar();
-  chrome.runtime.sendMessage({ type: 'STOP_RECORDING_REQUEST' });
+  chrome.runtime.sendMessage({ type: 'STOP_RECORDING_REQUEST' }).catch(() => {});
 }
 
 function togglePause() {
   if (isPaused) {
     isPaused = false;
-    chrome.runtime.sendMessage({ type: 'RESUME_RECORDING_REQUEST' });
+    chrome.runtime.sendMessage({ type: 'RESUME_RECORDING_REQUEST' }).catch(() => {});
   } else {
     isPaused = true;
-    chrome.runtime.sendMessage({ type: 'PAUSE_RECORDING_REQUEST' });
+    chrome.runtime.sendMessage({ type: 'PAUSE_RECORDING_REQUEST' }).catch(() => {});
   }
   return !isPaused;
 }
